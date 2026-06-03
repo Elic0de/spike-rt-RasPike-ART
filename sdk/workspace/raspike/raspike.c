@@ -19,6 +19,8 @@
 #include <spike/hub/light.h>
 #include <spike/hub/speaker.h>
 
+#include <pbdrv/reset.h>
+
 #include <spike/pup/motor.h>
 #include <spike/pup/colorsensor.h>
 #include <spike/pup/forcesensor.h>
@@ -384,6 +386,10 @@ static void process_sys_cmd(RasPikePort port, const int cmd_id, char *param)
   switch (cmd_id ) {
     case RP_CMD_ID_SHT_DWN:
       hub_system_shutdown();
+      // Not reached
+      break;
+    case RP_CMD_ID_RESTART:
+      pbdrv_reset(PBDRV_RESET_ACTION_RESET);
       // Not reached
       break;
     default:
