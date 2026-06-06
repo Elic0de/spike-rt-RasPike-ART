@@ -1,0 +1,43 @@
+import(<kernel.cdl>);
+
+import("syssvc/tSerialPort.cdl");
+import("syssvc/tSerialAdapter.cdl");
+import("syssvc/tSysLog.cdl");
+import("syssvc/tSysLogAdapter.cdl");
+import("syssvc/tLogTask.cdl");
+import("syssvc/tBanner.cdl");
+import("target.cdl");
+import("serial/tSIOAsyncPortTest.cdl");
+
+cell tSerialAdapter SerialAdapter {
+  cSerialPort[0] = SerialPortUSB1.eSerialPort;
+  cSerialPort[1] = SerialPortBluetooth1.eSerialPort;
+  cSerialPort[2] = SerialPortTest1.eSerialPort;
+};
+
+cell tSerialAsyncPort SerialPortUSB1 {
+  receiveBufferSize = 256;
+  sendBufferSize    = 256;
+
+  cSIOPort = SIOPortPybricksUSB1.eSIOPort;
+  eSIOCBR <= SIOPortPybricksUSB1.cSIOCBR;
+};
+
+cell tSerialAsyncPort SerialPortBluetooth1 {
+  receiveBufferSize = 256;
+  sendBufferSize    = 256;
+
+  cSIOPort = SIOPortPybricksBluetooth1.eSIOPort;
+  eSIOCBR <= SIOPortPybricksBluetooth1.cSIOCBR;
+};
+
+cell tSIOAsyncPortTest SIOPortTest1 {
+};
+
+cell tSerialAsyncPort SerialPortTest1 {
+  receiveBufferSize = 10;
+  sendBufferSize    = 10;
+
+  cSIOPort = SIOPortTest1.eSIOPort;
+  eSIOCBR <= SIOPortTest1.cSIOCBR;
+};

@@ -18,6 +18,10 @@ sdk/workspace/*
 !sdk/workspace/sample_c5/**
 !sdk/workspace/sample_cpp5
 !sdk/workspace/sample_cpp5/**
+!sdk/workspace/etrobo_qr_firmware
+!sdk/workspace/etrobo_qr_firmware/**
+!sdk/workspace/etrobo_firmware
+!sdk/workspace/etrobo_firmware/**
 !sdk/workspace/sample00
 !sdk/workspace/sample00/**
 !sdk/workspace/sample01
@@ -27,6 +31,8 @@ sdk/workspace/*
 # Ignore build directories under each sdk/workspace project folder
 sdk/workspace/*/build/
 sdk/workspace/*/build/**
+sdk/workspace/*/obj-primehub_pybricks/
+sdk/workspace/*/obj-primehub_pybricks/**
 
 # Ignore everything under tools except docker and requirements.txt
 tools/*
