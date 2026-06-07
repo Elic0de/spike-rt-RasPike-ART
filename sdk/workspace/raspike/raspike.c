@@ -34,6 +34,118 @@
 
 #define RP_MAX_DEVICES (6)
 
+#ifndef RASPIKE_MEASURE_USB_LOOP
+#define RASPIKE_MEASURE_USB_LOOP 0
+#endif
+
+#if RASPIKE_MEASURE_USB_LOOP
+#ifndef RASPIKE_MEASURE_MAX_SAMPLES
+#define RASPIKE_MEASURE_MAX_SAMPLES 1024
+#endif
+
+typedef struct {
+  unsigned long timestamp_us;
+  unsigned long dt_us;
+  unsigned long body_us;
+  long deadline_lag_us;
+  int port;
+  int cmd;
+  int value;
+} RPMeasureSample;
+
+static RPMeasureSample fgMotorPowerSamples[RASPIKE_MEASURE_MAX_SAMPLES];
+static RPMeasureSample fgNotifySamples[RASPIKE_MEASURE_MAX_SAMPLES];
+static unsigned int fgMotorPowerSampleCount = 0;
+static unsigned int fgNotifySampleCount = 0;
+static unsigned long fgLastMotorPowerUs[RP_MAX_DEVICES] = {0};
+static unsigned long fgLastNotifyUs = 0;
+static unsigned long fgNextNotifyDeadlineUs = 0;
+static int fgMeasureFlushed = 0;
+
+static int raspike_send_data(RasPikePort port , int msg_id, const char *buf, size_t size);
+
+static unsigned long measure_now_us(void)
+{
+  SYSTIM now = 0;
+  ER ercd = get_tim(&now);
+  return ercd == E_OK ? (unsigned long)now : 0UL;
+}
+
+static void measure_send_rows(int source_id, const RPMeasureSample *samples, unsigned int count)
+{
+  for (unsigned int i = 0; i < count; ++i) {
+    const RPMeasureSample *s = samples + i;
+    RPProtocolMeasureRow row = {
+      source_id,
+      (int32_t)i,
+      (int32_t)s->timestamp_us,
+      (int32_t)s->dt_us,
+      (int32_t)s->body_us,
+      (int32_t)s->deadline_lag_us,
+      (int32_t)s->port,
+      (int32_t)s->cmd,
+      (int32_t)s->value,
+    };
+    raspike_send_data(RP_PORT_NONE, RP_CMD_ID_MEASURE_ROW, (const char *)&row, sizeof(row));
+  }
+}
+
+static void measure_flush(void)
+{
+  if (fgMeasureFlushed) return;
+  fgMeasureFlushed = 1;
+
+  measure_send_rows(1, fgMotorPowerSamples, fgMotorPowerSampleCount);
+  measure_send_rows(2, fgNotifySamples, fgNotifySampleCount);
+}
+
+static void measure_motor_power_rx(RasPikePort port, int cmd, int value, unsigned long body_us)
+{
+  if (port < 0 || port >= RP_MAX_DEVICES) return;
+  if (fgMotorPowerSampleCount >= RASPIKE_MEASURE_MAX_SAMPLES) {
+    measure_flush();
+    return;
+  }
+
+  unsigned long now_us = measure_now_us();
+  RPMeasureSample *s = fgMotorPowerSamples + fgMotorPowerSampleCount;
+  s->timestamp_us = now_us;
+  s->dt_us = fgLastMotorPowerUs[port] == 0 ? 0UL : now_us - fgLastMotorPowerUs[port];
+  s->body_us = body_us;
+  s->deadline_lag_us = 0;
+  s->port = port;
+  s->cmd = cmd;
+  s->value = value;
+  fgLastMotorPowerUs[port] = now_us;
+  ++fgMotorPowerSampleCount;
+}
+
+static void measure_notify_task(unsigned long start_us, unsigned long end_us)
+{
+  if (fgNotifySampleCount >= RASPIKE_MEASURE_MAX_SAMPLES) {
+    measure_flush();
+    return;
+  }
+  if (fgNextNotifyDeadlineUs == 0) {
+    fgNextNotifyDeadlineUs = start_us;
+  }
+
+  RPMeasureSample *s = fgNotifySamples + fgNotifySampleCount;
+  s->timestamp_us = start_us;
+  s->dt_us = fgLastNotifyUs == 0 ? 0UL : start_us - fgLastNotifyUs;
+  s->body_us = end_us >= start_us ? end_us - start_us : 0UL;
+  s->deadline_lag_us = start_us >= fgNextNotifyDeadlineUs
+                           ? (long)(start_us - fgNextNotifyDeadlineUs)
+                           : -(long)(fgNextNotifyDeadlineUs - start_us);
+  s->port = -1;
+  s->cmd = -1;
+  s->value = 0;
+  fgLastNotifyUs = start_us;
+  fgNextNotifyDeadlineUs += 10000UL;
+  ++fgNotifySampleCount;
+}
+#endif
+
 #define RP_ASSERT(cond,val) rp_assert(cond,val)
 
 static void rp_assert(int cond, int val)
@@ -385,12 +497,23 @@ static void process_sys_cmd(RasPikePort port, const int cmd_id, char *param)
 {
   switch (cmd_id ) {
     case RP_CMD_ID_SHT_DWN:
+#if RASPIKE_MEASURE_USB_LOOP
+      measure_flush();
+#endif
       hub_system_shutdown();
       // Not reached
       break;
     case RP_CMD_ID_RESTART:
+#if RASPIKE_MEASURE_USB_LOOP
+      measure_flush();
+#endif
       pbdrv_reset(PBDRV_RESET_ACTION_RESET);
       // Not reached
+      break;
+    case RP_CMD_ID_MEASURE_FLUSH:
+#if RASPIKE_MEASURE_USB_LOOP
+      measure_flush();
+#endif
       break;
     default:
       break;
@@ -570,7 +693,17 @@ static void process_motor_cmd(RasPikePort port, const int cmd_id, const char *pa
       RP_ASSERT(fgDevices[port].config == RP_CMD_TYPE_MOTOR, 64);
       RPProtocolParamMotorValue *pm = (RPProtocolParamMotorValue *)param;
       // do not check error
+#if RASPIKE_MEASURE_USB_LOOP
+      unsigned long measure_start_us = measure_now_us();
+#endif
       pup_motor_set_power(fgDevices[port].device,pm->val);
+#if RASPIKE_MEASURE_USB_LOOP
+      unsigned long measure_end_us = measure_now_us();
+      measure_motor_power_rx(port, cmd_id, pm->val,
+                             measure_end_us >= measure_start_us
+                                 ? measure_end_us - measure_start_us
+                                 : 0UL);
+#endif
     }
     break;
     case RP_CMD_ID_MOT_STP:
@@ -926,7 +1059,14 @@ void main_task(intptr_t exinf)
 /* notification task*/
 void notify_task(intptr_t exinf)
 {
+#if RASPIKE_MEASURE_USB_LOOP
+  unsigned long measure_start_us = measure_now_us();
+#endif
   notify_status();
+#if RASPIKE_MEASURE_USB_LOOP
+  unsigned long measure_end_us = measure_now_us();
+  measure_notify_task(measure_start_us, measure_end_us);
+#endif
   ext_tsk();
 }
 
