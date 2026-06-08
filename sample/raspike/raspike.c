@@ -42,6 +42,9 @@
 #ifndef RASPIKE_MEASURE_MAX_SAMPLES
 #define RASPIKE_MEASURE_MAX_SAMPLES 256
 #endif
+#ifndef RASPIKE_MEASURE_MAX_ANOMALIES
+#define RASPIKE_MEASURE_MAX_ANOMALIES 128
+#endif
 #define RASPIKE_MEASURE_TARGET_US 10000UL
 #define RASPIKE_MEASURE_TOLERANCE_US 1000UL
 #define RASPIKE_MEASURE_HIST_BIN_US 500UL
@@ -71,8 +74,12 @@ typedef struct {
 
 static RPMeasureSample fgMotorPowerSamples[RASPIKE_MEASURE_MAX_SAMPLES];
 static RPMeasureSample fgNotifySamples[RASPIKE_MEASURE_MAX_SAMPLES];
+static RPMeasureSample fgMotorPowerAnomalies[RASPIKE_MEASURE_MAX_ANOMALIES];
+static RPMeasureSample fgNotifyAnomalies[RASPIKE_MEASURE_MAX_ANOMALIES];
 static unsigned int fgMotorPowerSampleCount = 0;
 static unsigned int fgNotifySampleCount = 0;
+static unsigned int fgMotorPowerAnomalyCount = 0;
+static unsigned int fgNotifyAnomalyCount = 0;
 static unsigned long fgLastMotorPowerUs[RP_MAX_DEVICES] = {0};
 static unsigned long fgLastNotifyUs = 0;
 static unsigned long fgNextNotifyDeadlineUs = 0;
@@ -111,6 +118,13 @@ static void measure_stats_update(RPMeasureStats *stats, unsigned long timestamp_
   ++stats->count;
   stats->sum_dt_us += dt_us;
   stats->last_timestamp_us = (uint32_t)timestamp_us;
+}
+
+static int measure_is_out_of_range(unsigned long dt_us)
+{
+  return dt_us != 0 &&
+         (dt_us < RASPIKE_MEASURE_TARGET_US - RASPIKE_MEASURE_TOLERANCE_US ||
+          dt_us > RASPIKE_MEASURE_TARGET_US + RASPIKE_MEASURE_TOLERANCE_US);
 }
 
 static uint32_t measure_stats_percentile(const RPMeasureStats *stats, uint32_t pct)
@@ -174,6 +188,8 @@ static void measure_flush(void)
 
   measure_send_rows(1, fgMotorPowerSamples, fgMotorPowerSampleCount);
   measure_send_rows(2, fgNotifySamples, fgNotifySampleCount);
+  measure_send_rows(3, fgMotorPowerAnomalies, fgMotorPowerAnomalyCount);
+  measure_send_rows(4, fgNotifyAnomalies, fgNotifyAnomalyCount);
   measure_send_stats(1, &fgMotorPowerStats);
   measure_send_stats(2, &fgNotifyStats);
 }
@@ -186,20 +202,27 @@ static void measure_motor_power_rx(RasPikePort port, int cmd, int value, unsigne
   measure_stats_update(&fgMotorPowerStats, now_us, dt_us);
   fgLastMotorPowerUs[port] = now_us;
 
-  if (fgMotorPowerSampleCount >= RASPIKE_MEASURE_MAX_SAMPLES) {
+  RPMeasureSample sample = {
+    now_us,
+    dt_us,
+    body_us,
+    0,
+    port,
+    cmd,
+    value,
+  };
+
+  if (fgMotorPowerSampleCount < RASPIKE_MEASURE_MAX_SAMPLES) {
+    fgMotorPowerSamples[fgMotorPowerSampleCount] = sample;
+    ++fgMotorPowerSampleCount;
+  } else {
     ++fgMotorPowerStats.dropped;
-    return;
   }
 
-  RPMeasureSample *s = fgMotorPowerSamples + fgMotorPowerSampleCount;
-  s->timestamp_us = now_us;
-  s->dt_us = dt_us;
-  s->body_us = body_us;
-  s->deadline_lag_us = 0;
-  s->port = port;
-  s->cmd = cmd;
-  s->value = value;
-  ++fgMotorPowerSampleCount;
+  if (measure_is_out_of_range(dt_us) && fgMotorPowerAnomalyCount < RASPIKE_MEASURE_MAX_ANOMALIES) {
+    fgMotorPowerAnomalies[fgMotorPowerAnomalyCount] = sample;
+    ++fgMotorPowerAnomalyCount;
+  }
 }
 
 static void measure_notify_task(unsigned long start_us, unsigned long end_us)
@@ -211,24 +234,30 @@ static void measure_notify_task(unsigned long start_us, unsigned long end_us)
   measure_stats_update(&fgNotifyStats, start_us, dt_us);
   fgLastNotifyUs = start_us;
 
-  if (fgNotifySampleCount >= RASPIKE_MEASURE_MAX_SAMPLES) {
+  RPMeasureSample sample = {
+    start_us,
+    dt_us,
+    end_us >= start_us ? end_us - start_us : 0UL,
+    start_us >= fgNextNotifyDeadlineUs
+        ? (long)(start_us - fgNextNotifyDeadlineUs)
+        : -(long)(fgNextNotifyDeadlineUs - start_us),
+    -1,
+    -1,
+    0,
+  };
+  fgNextNotifyDeadlineUs += 10000UL;
+
+  if (fgNotifySampleCount < RASPIKE_MEASURE_MAX_SAMPLES) {
+    fgNotifySamples[fgNotifySampleCount] = sample;
+    ++fgNotifySampleCount;
+  } else {
     ++fgNotifyStats.dropped;
-    fgNextNotifyDeadlineUs += 10000UL;
-    return;
   }
 
-  RPMeasureSample *s = fgNotifySamples + fgNotifySampleCount;
-  s->timestamp_us = start_us;
-  s->dt_us = dt_us;
-  s->body_us = end_us >= start_us ? end_us - start_us : 0UL;
-  s->deadline_lag_us = start_us >= fgNextNotifyDeadlineUs
-                           ? (long)(start_us - fgNextNotifyDeadlineUs)
-                           : -(long)(fgNextNotifyDeadlineUs - start_us);
-  s->port = -1;
-  s->cmd = -1;
-  s->value = 0;
-  fgNextNotifyDeadlineUs += 10000UL;
-  ++fgNotifySampleCount;
+  if (measure_is_out_of_range(dt_us) && fgNotifyAnomalyCount < RASPIKE_MEASURE_MAX_ANOMALIES) {
+    fgNotifyAnomalies[fgNotifyAnomalyCount] = sample;
+    ++fgNotifyAnomalyCount;
+  }
 }
 #endif
 
