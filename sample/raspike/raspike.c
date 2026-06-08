@@ -42,9 +42,6 @@
 #ifndef RASPIKE_MEASURE_MAX_SAMPLES
 #define RASPIKE_MEASURE_MAX_SAMPLES 256
 #endif
-#ifndef RASPIKE_MEASURE_MAX_ANOMALIES
-#define RASPIKE_MEASURE_MAX_ANOMALIES 128
-#endif
 #define RASPIKE_MEASURE_TARGET_US 10000UL
 #define RASPIKE_MEASURE_TOLERANCE_US 1000UL
 #define RASPIKE_MEASURE_HIST_BIN_US 500UL
@@ -74,12 +71,8 @@ typedef struct {
 
 static RPMeasureSample fgMotorPowerSamples[RASPIKE_MEASURE_MAX_SAMPLES];
 static RPMeasureSample fgNotifySamples[RASPIKE_MEASURE_MAX_SAMPLES];
-static RPMeasureSample fgMotorPowerAnomalies[RASPIKE_MEASURE_MAX_ANOMALIES];
-static RPMeasureSample fgNotifyAnomalies[RASPIKE_MEASURE_MAX_ANOMALIES];
 static unsigned int fgMotorPowerSampleCount = 0;
 static unsigned int fgNotifySampleCount = 0;
-static unsigned int fgMotorPowerAnomalyCount = 0;
-static unsigned int fgNotifyAnomalyCount = 0;
 static unsigned long fgLastMotorPowerUs[RP_MAX_DEVICES] = {0};
 static unsigned long fgLastNotifyUs = 0;
 static unsigned long fgNextNotifyDeadlineUs = 0;
@@ -160,6 +153,22 @@ static void measure_send_rows(int source_id, const RPMeasureSample *samples, uns
   }
 }
 
+static void measure_send_row(int source_id, int seq, const RPMeasureSample *s)
+{
+  RPProtocolMeasureRow row = {
+    source_id,
+    (int32_t)seq,
+    (int32_t)s->timestamp_us,
+    (int32_t)s->dt_us,
+    (int32_t)s->body_us,
+    (int32_t)s->deadline_lag_us,
+    (int32_t)s->port,
+    (int32_t)s->cmd,
+    (int32_t)s->value,
+  };
+  raspike_send_data(RP_PORT_NONE, RP_CMD_ID_MEASURE_ROW, (const char *)&row, sizeof(row));
+}
+
 static void measure_send_stats(int source_id, const RPMeasureStats *stats)
 {
   uint32_t avg = stats->count == 0 ? 0U : (uint32_t)(stats->sum_dt_us / stats->count);
@@ -188,8 +197,6 @@ static void measure_flush(void)
 
   measure_send_rows(1, fgMotorPowerSamples, fgMotorPowerSampleCount);
   measure_send_rows(2, fgNotifySamples, fgNotifySampleCount);
-  measure_send_rows(3, fgMotorPowerAnomalies, fgMotorPowerAnomalyCount);
-  measure_send_rows(4, fgNotifyAnomalies, fgNotifyAnomalyCount);
   measure_send_stats(1, &fgMotorPowerStats);
   measure_send_stats(2, &fgNotifyStats);
 }
@@ -219,9 +226,8 @@ static void measure_motor_power_rx(RasPikePort port, int cmd, int value, unsigne
     ++fgMotorPowerStats.dropped;
   }
 
-  if (measure_is_out_of_range(dt_us) && fgMotorPowerAnomalyCount < RASPIKE_MEASURE_MAX_ANOMALIES) {
-    fgMotorPowerAnomalies[fgMotorPowerAnomalyCount] = sample;
-    ++fgMotorPowerAnomalyCount;
+  if (measure_is_out_of_range(dt_us)) {
+    measure_send_row(3, (int)fgMotorPowerStats.out_of_range, &sample);
   }
 }
 
@@ -254,9 +260,8 @@ static void measure_notify_task(unsigned long start_us, unsigned long end_us)
     ++fgNotifyStats.dropped;
   }
 
-  if (measure_is_out_of_range(dt_us) && fgNotifyAnomalyCount < RASPIKE_MEASURE_MAX_ANOMALIES) {
-    fgNotifyAnomalies[fgNotifyAnomalyCount] = sample;
-    ++fgNotifyAnomalyCount;
+  if (measure_is_out_of_range(dt_us)) {
+    measure_send_row(4, (int)fgNotifyStats.out_of_range, &sample);
   }
 }
 #endif
