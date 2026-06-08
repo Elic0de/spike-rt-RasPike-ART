@@ -40,7 +40,7 @@
 
 #if RASPIKE_MEASURE_USB_LOOP
 #ifndef RASPIKE_MEASURE_MAX_SAMPLES
-#define RASPIKE_MEASURE_MAX_SAMPLES 1024
+#define RASPIKE_MEASURE_MAX_SAMPLES 2048
 #endif
 
 typedef struct {
@@ -103,7 +103,6 @@ static void measure_motor_power_rx(RasPikePort port, int cmd, int value, unsigne
 {
   if (port < 0 || port >= RP_MAX_DEVICES) return;
   if (fgMotorPowerSampleCount >= RASPIKE_MEASURE_MAX_SAMPLES) {
-    measure_flush();
     return;
   }
 
@@ -123,7 +122,6 @@ static void measure_motor_power_rx(RasPikePort port, int cmd, int value, unsigne
 static void measure_notify_task(unsigned long start_us, unsigned long end_us)
 {
   if (fgNotifySampleCount >= RASPIKE_MEASURE_MAX_SAMPLES) {
-    measure_flush();
     return;
   }
   if (fgNextNotifyDeadlineUs == 0) {
