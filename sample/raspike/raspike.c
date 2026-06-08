@@ -42,6 +42,9 @@
 #ifndef RASPIKE_MEASURE_MAX_SAMPLES
 #define RASPIKE_MEASURE_MAX_SAMPLES 256
 #endif
+#ifndef RASPIKE_MEASURE_TX_QUEUE_SIZE
+#define RASPIKE_MEASURE_TX_QUEUE_SIZE 64
+#endif
 #define RASPIKE_MEASURE_TARGET_US 10000UL
 #define RASPIKE_MEASURE_TOLERANCE_US 1000UL
 #define RASPIKE_MEASURE_HIST_BIN_US 500UL
@@ -71,8 +74,13 @@ typedef struct {
 
 static RPMeasureSample fgMotorPowerSamples[RASPIKE_MEASURE_MAX_SAMPLES];
 static RPMeasureSample fgNotifySamples[RASPIKE_MEASURE_MAX_SAMPLES];
+static RPProtocolMeasureRow fgMeasureTxQueue[RASPIKE_MEASURE_TX_QUEUE_SIZE];
 static unsigned int fgMotorPowerSampleCount = 0;
 static unsigned int fgNotifySampleCount = 0;
+static unsigned int fgMeasureTxHead = 0;
+static unsigned int fgMeasureTxTail = 0;
+static unsigned int fgMeasureTxCount = 0;
+static uint32_t fgMeasureTxDropped = 0;
 static unsigned long fgLastMotorPowerUs[RP_MAX_DEVICES] = {0};
 static unsigned long fgLastNotifyUs = 0;
 static unsigned long fgNextNotifyDeadlineUs = 0;
@@ -134,26 +142,7 @@ static uint32_t measure_stats_percentile(const RPMeasureStats *stats, uint32_t p
   return (uint32_t)((RASPIKE_MEASURE_HIST_BINS - 1U) * RASPIKE_MEASURE_HIST_BIN_US);
 }
 
-static void measure_send_rows(int source_id, const RPMeasureSample *samples, unsigned int count)
-{
-  for (unsigned int i = 0; i < count; ++i) {
-    const RPMeasureSample *s = samples + i;
-    RPProtocolMeasureRow row = {
-      source_id,
-      (int32_t)i,
-      (int32_t)s->timestamp_us,
-      (int32_t)s->dt_us,
-      (int32_t)s->body_us,
-      (int32_t)s->deadline_lag_us,
-      (int32_t)s->port,
-      (int32_t)s->cmd,
-      (int32_t)s->value,
-    };
-    raspike_send_data(RP_PORT_NONE, RP_CMD_ID_MEASURE_ROW, (const char *)&row, sizeof(row));
-  }
-}
-
-static void measure_send_row(int source_id, int seq, const RPMeasureSample *s)
+static RPProtocolMeasureRow measure_make_row(int source_id, int seq, const RPMeasureSample *s)
 {
   RPProtocolMeasureRow row = {
     source_id,
@@ -166,7 +155,56 @@ static void measure_send_row(int source_id, int seq, const RPMeasureSample *s)
     (int32_t)s->cmd,
     (int32_t)s->value,
   };
-  raspike_send_data(RP_PORT_NONE, RP_CMD_ID_MEASURE_ROW, (const char *)&row, sizeof(row));
+  return row;
+}
+
+static void measure_queue_row(const RPProtocolMeasureRow *row)
+{
+  loc_cpu();
+  if (fgMeasureTxCount < RASPIKE_MEASURE_TX_QUEUE_SIZE) {
+    fgMeasureTxQueue[fgMeasureTxTail] = *row;
+    fgMeasureTxTail = (fgMeasureTxTail + 1U) % RASPIKE_MEASURE_TX_QUEUE_SIZE;
+    ++fgMeasureTxCount;
+  } else {
+    ++fgMeasureTxDropped;
+  }
+  unl_cpu();
+}
+
+static int measure_dequeue_row(RPProtocolMeasureRow *row)
+{
+  int found = 0;
+  loc_cpu();
+  if (fgMeasureTxCount > 0) {
+    *row = fgMeasureTxQueue[fgMeasureTxHead];
+    fgMeasureTxHead = (fgMeasureTxHead + 1U) % RASPIKE_MEASURE_TX_QUEUE_SIZE;
+    --fgMeasureTxCount;
+    found = 1;
+  }
+  unl_cpu();
+  return found;
+}
+
+static void measure_send_rows(int source_id, const RPMeasureSample *samples, unsigned int count)
+{
+  for (unsigned int i = 0; i < count; ++i) {
+    RPProtocolMeasureRow row = measure_make_row(source_id, (int)i, samples + i);
+    raspike_send_data(RP_PORT_NONE, RP_CMD_ID_MEASURE_ROW, (const char *)&row, sizeof(row));
+  }
+}
+
+static void measure_send_row(int source_id, int seq, const RPMeasureSample *s)
+{
+  RPProtocolMeasureRow row = measure_make_row(source_id, seq, s);
+  measure_queue_row(&row);
+}
+
+static void measure_drain_tx_queue(void)
+{
+  RPProtocolMeasureRow row;
+  while (measure_dequeue_row(&row)) {
+    raspike_send_data(RP_PORT_NONE, RP_CMD_ID_MEASURE_ROW, (const char *)&row, sizeof(row));
+  }
 }
 
 static void measure_send_stats(int source_id, const RPMeasureStats *stats)
@@ -195,6 +233,7 @@ static void measure_flush(void)
   if (fgMeasureFlushed) return;
   fgMeasureFlushed = 1;
 
+  measure_drain_tx_queue();
   measure_send_rows(1, fgMotorPowerSamples, fgMotorPowerSampleCount);
   measure_send_rows(2, fgNotifySamples, fgNotifySampleCount);
   measure_send_stats(1, &fgMotorPowerStats);
@@ -1148,6 +1187,9 @@ void main_task(intptr_t exinf)
     raspike_receive_data(buf,sizeof(buf),&port,&cmd,&data_size);
 //    hub_display_number(cmd);
     process_cmd(port,cmd,buf);
+#if RASPIKE_MEASURE_USB_LOOP
+    measure_drain_tx_queue();
+#endif
   }
 
 
