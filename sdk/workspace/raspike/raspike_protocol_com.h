@@ -32,6 +32,7 @@
 #define RP_CMD_ID_RESTART (MAKE_CMD(RP_CMD_TYPE_SYS,0x4)) // 0x04
 #define RP_CMD_ID_MEASURE_ROW (MAKE_CMD(RP_CMD_TYPE_SYS,0x5)) // 0x05
 #define RP_CMD_ID_MEASURE_FLUSH (MAKE_CMD(RP_CMD_TYPE_SYS,0x6)) // 0x06
+#define RP_CMD_ID_MEASURE_STATS (MAKE_CMD(RP_CMD_TYPE_SYS,0x7)) // 0x07
 
 typedef struct {
     int32_t source_id;
@@ -44,6 +45,22 @@ typedef struct {
     int32_t cmd;
     int32_t value;
 } RPProtocolMeasureRow;
+
+typedef struct {
+    int32_t source_id;
+    int32_t count;
+    int32_t min_dt_us;
+    int32_t max_dt_us;
+    int32_t avg_dt_us;
+    int32_t p95_dt_us;
+    int32_t p99_dt_us;
+    int32_t out_of_range;
+    int32_t dropped;
+    int32_t first_timestamp_us;
+    int32_t last_timestamp_us;
+    int32_t sum_dt_us_lo;
+    int32_t sum_dt_us_hi;
+} RPProtocolMeasureStats;
 
 
 // COLOR SENSOR CMD
