@@ -69,10 +69,8 @@ const uint_t SIOAsyncReceivePush = 2; /* 受信通知コールバック */
  */
 [callback]
 signature sSIOAsyncCBR {
-  ER_UINT popSend([out] char *dst);
-  //ER_UINT popSend([out] char *dst_data, [in] uint_t max_size);
-  ER_UINT pushReceive([in] char src);
-  //ER_UINT pushReceive([in] const char *src_data, [in] uint_t size);
+  ER_UINT popSend([out, size_is(max_size)] char *dst_data, [in] uint_t max_size);
+  ER_UINT pushReceive([in, size_is(size)] const char *src_data, [in] uint_t size);
   ER_UINT sizeSend(void);
 };
 

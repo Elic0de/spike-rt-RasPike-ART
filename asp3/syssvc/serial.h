@@ -67,6 +67,7 @@ extern ER		serial_opn_por(ID portid) throw();
 extern ER		serial_cls_por(ID portid) throw();
 extern ER_UINT	serial_rea_dat(ID portid, char *buf, uint_t len) throw();
 extern ER_UINT	serial_wri_dat(ID portid, const char *buf, uint_t len) throw();
+extern ER_UINT	serial_try_wri_dat(ID portid, const char *buf, uint_t len) throw();
 extern ER		serial_ctl_por(ID portid, uint_t ioctl) throw();
 extern ER		serial_ref_por(ID portid, T_SERIAL_RPOR *pk_rpor) throw();
 

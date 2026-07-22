@@ -95,8 +95,11 @@ cell tSerialAdapter SerialAdapter {
 //};
 
 cell tSerialAsyncPort SerialPortUSB1 {
-  receiveBufferSize = 256;      /* 受信バッファのサイズ */
-  sendBufferSize    = 256;      /* 送信バッファのサイズ */
+  /* Keep at least four complete protocol-v2 frames. A single frame can be
+     256 bytes including header and CRC, so a 256-byte queue has no burst
+     headroom and makes telemetry contend directly with command ACKs. */
+  receiveBufferSize = 1024;
+  sendBufferSize    = 1024;
 
   /* ターゲット依存部との結合 */
   cSIOPort = SIOPortPybricksUSB1.eSIOPort;

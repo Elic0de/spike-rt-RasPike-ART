@@ -110,6 +110,23 @@ serial_wri_dat(ID portid, const char *buf, uint_t len)
 }
 
 /*
+ *  シリアルポートへの非ブロッキング文字列送信（サービスコール）
+ *  全データを即座にキューへ格納できない場合はE_QOVRを返す．
+ */
+ER_UINT
+serial_try_wri_dat(ID portid, const char *buf, uint_t len)
+{
+	if (sns_dpn()) {
+		return(E_CTX);
+	}
+	if (!(1 <= portid && portid <= N_CP_cSerialPort)) {
+		return(E_ID);
+	}
+
+	return(cSerialPort_tryWrite(portid - 1, buf, len));
+}
+
+/*
  *  シリアルポートの制御（サービスコール）
  */
 ER

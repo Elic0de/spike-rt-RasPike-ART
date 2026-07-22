@@ -229,16 +229,29 @@ pup_color_hsv_t pup_color_sensor_color(pup_device_t *pdev, bool surface) {
 	return cb_color_map_get_color(&color_map, &hsv);
 }
 
-int32_t pup_color_sensor_reflection(pup_device_t *pdev) {
-	int32_t data[4];
-  pbio_error_t err;
-
-  err = pup_device_get_values(pdev, PBIO_IODEV_MODE_PUP_COLOR_SENSOR__RGB_I, data);
-  if (err != PBIO_SUCCESS) {
-    syslog(LOG_ERROR, "pup_color_sensor_reflection() failed.");
-    data[0] = 0; data[1] = 0; data[2] = 0;
+pbio_error_t pup_color_sensor_get_reflection_realtime(pup_device_t *pdev,
+                                                       int32_t *reflection) {
+  if (!pdev || !reflection) {
+    return PBIO_ERROR_INVALID_ARG;
   }
-  return (data[0] + data[1] + data[2]) * 100 / 3072;
+  int32_t data[4] = {0};
+  pbio_error_t err = pup_device_get_values(
+      pdev, PBIO_IODEV_MODE_PUP_COLOR_SENSOR__RGB_I, data);
+  if (err != PBIO_SUCCESS) {
+    *reflection = 0;
+    return err;
+  }
+  *reflection = (data[0] + data[1] + data[2]) * 100 / 3072;
+  return PBIO_SUCCESS;
+}
+
+int32_t pup_color_sensor_reflection(pup_device_t *pdev) {
+  int32_t reflection = 0;
+  if (pup_color_sensor_get_reflection_realtime(pdev, &reflection)
+      != PBIO_SUCCESS) {
+    syslog(LOG_ERROR, "pup_color_sensor_reflection() failed.");
+  }
+  return reflection;
 }
 
 int32_t pup_color_sensor_ambient(pup_device_t *pdev) {

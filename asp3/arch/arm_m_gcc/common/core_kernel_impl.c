@@ -355,6 +355,8 @@ core_int_entry(void)
 #endif /* __TARGET_ARCH_THUMB >= 4 */
 }
 
+extern void target_emergency_stop(void);
+
 #ifndef OMIT_DEFAULT_EXC_HANDLER
 /*
  *  未登録の例外が発生した場合に呼び出される
@@ -362,6 +364,7 @@ core_int_entry(void)
 void
 default_exc_handler(void *p_excinf)
 {
+	target_emergency_stop();
 	uint32_t basepri = *(((uint32_t*)p_excinf) + P_EXCINF_OFFSET_BASEPRI);
 	uint32_t pc      = *(((uint32_t*)p_excinf) + P_EXCINF_OFFSET_PC);
 	uint32_t xpsr    = *(((uint32_t*)p_excinf) + P_EXCINF_OFFSET_XPSR);
@@ -405,6 +408,7 @@ default_exc_handler(void *p_excinf)
 void
 default_int_handler(void)
 {
+	target_emergency_stop();
 	uint32_t intno = get_ipsr() & IPSR_ISR_NUMBER;
 
 	syslog(LOG_EMERG, "\nUnregistered Interrupt occurs.");

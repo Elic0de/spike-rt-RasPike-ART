@@ -9,6 +9,8 @@
 
 #include <t_syslog.h>
 #include <spike/hub/system.h>
+#include <pbdrv/motor_driver.h>
+#include <pbio/main.h>
 
 /*
  * TODO: 
@@ -21,4 +23,18 @@ void hub_system_shutdown(void) {
 
   /* Never come back here */
   while(1);
+}
+
+
+void hub_emergency_stop_all(bool brake) {
+  pbio_stop_all(true);
+  if (brake) {
+    pbdrv_motor_driver_emergency_brake_all();
+  } else {
+    pbdrv_motor_driver_emergency_coast_all();
+  }
+}
+
+void hub_motor_emergency_disable_from_isr(void) {
+  pbdrv_motor_driver_emergency_coast_all();
 }

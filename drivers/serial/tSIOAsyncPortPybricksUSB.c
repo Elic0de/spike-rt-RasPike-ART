@@ -66,13 +66,13 @@ eSIOCBR_sizeSend(void)
 }
 
 ER_UINT
-eSIOCBR_popSend(char *dst)
+eSIOCBR_popSend(char *dst_data, uint_t max_size)
 {
-  return cSIOCBR_popSend(dst);
+  return cSIOCBR_popSend(dst_data, max_size);
 }
 
 ER_UINT
-eSIOCBR_pushReceive(char src)
+eSIOCBR_pushReceive(const char *src_data, uint_t size)
 {
-  return cSIOCBR_pushReceive(src);
+  return cSIOCBR_pushReceive(src_data, size);
 }

@@ -12,7 +12,7 @@
  *  タスクの優先度の定義
  */
 
-#define APP_HIGHEST_PRIORITY 5
+#define APP_HIGHEST_PRIORITY 3
 #define MAIN_PRIORITY   5    /* メインタスクの優先度 */
 
 /*
@@ -20,6 +20,7 @@
  */
 
 #define MAIN_STACK_SIZE 4096    /* タスクのスタックサイズ */
+#define CRITICAL_TX_STACK_SIZE 1024
 
 /*
  *  関数のプロトタイプ宣言
@@ -28,7 +29,14 @@
 
 extern void main_task(intptr_t exinf);
 extern void notify_task(intptr_t exinf);
+extern void drive_telemetry_task(intptr_t exinf);
 extern void soner_task(intptr_t exinf);
+extern void realtime_drive_task(intptr_t exinf);
+extern void realtime_drive_cyclic_handler(intptr_t exinf);
+extern void critical_tx_task(intptr_t exinf);
+extern void safety_supervisor_task(intptr_t exinf);
+extern void safety_supervisor_cyclic_handler(intptr_t exinf);
+extern void runtime_telemetry_task(intptr_t exinf);
 
 #endif /* TOPPERS_MACRO_ONLY */
 

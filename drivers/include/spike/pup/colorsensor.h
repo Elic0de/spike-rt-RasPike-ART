@@ -122,6 +122,10 @@ pup_color_hsv_t pup_color_sensor_hsv(pup_device_t *pdev, bool surface);
  */
 int32_t pup_color_sensor_reflection(pup_device_t *pdev);
 
+/** Reads reflection without logging. Intended for deterministic periodic loops. */
+pbio_error_t pup_color_sensor_get_reflection_realtime(pup_device_t *pdev,
+                                                       int32_t *reflection);
+
 /**
  * \~English
  * \brief					Get the ambient light intensity.

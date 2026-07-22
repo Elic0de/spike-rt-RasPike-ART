@@ -39,13 +39,13 @@ pup_motor_t *pup_motor_get_device(pbio_port_id_t port) {
     return NULL;
   }
 
-  for(int i = 0; i < 200; i++)
+  for(int i = 0; i < 20; i++)
   {
     err = pbio_servo_get_servo(port, &motor);
     if ((err == PBIO_SUCCESS) || (err != PBIO_ERROR_AGAIN)) {
       break;
     }
-    dly_tsk(50*1000);
+    dly_tsk(10*1000);
   }
   if (err != PBIO_SUCCESS) {
     errlog("pup_motor_get_device()", port, err);
@@ -89,6 +89,20 @@ int32_t pup_motor_get_speed(pup_motor_t *motor) {
   return speed;
 }
 
+pbio_error_t pup_motor_get_state(pup_motor_t *motor,
+                                  int32_t *count,
+                                  int32_t *speed) {
+  if (!motor || !count || !speed) {
+    return PBIO_ERROR_INVALID_ARG;
+  }
+  pbio_error_t err = pbio_servo_get_state_user(motor, count, speed);
+  if (err != PBIO_SUCCESS) {
+    *count = 0;
+    *speed = 0;
+  }
+  return err;
+}
+
 pbio_error_t pup_motor_stop(pup_motor_t *motor) {
   pbio_error_t err = pybricks_c_common_dcmotor_stop(motor->dcmotor);
   if (err != PBIO_SUCCESS) {
@@ -128,6 +142,15 @@ pbio_error_t pup_motor_set_power(pup_motor_t *motor, int power) {
   if (err != PBIO_SUCCESS) {
     errlog("pup_motor_set_power()", motor->dcmotor->port, err);
   } 
+  return err;
+}
+
+pbio_error_t pup_motor_set_power_realtime(pup_motor_t *motor, int power) {
+  if (!motor) {
+    return PBIO_ERROR_INVALID_ARG;
+  }
+  const int32_t voltage = pbio_battery_get_voltage_from_duty_pct(power);
+  pbio_error_t err = pbio_dcmotor_set_voltage(motor->dcmotor, voltage);
   return err;
 }
 

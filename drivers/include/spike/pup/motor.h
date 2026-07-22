@@ -122,6 +122,16 @@ int32_t pup_motor_get_count(pup_motor_t *motor);
  */
 int32_t pup_motor_get_speed(pup_motor_t *motor);
 
+/** Reads user angle and speed from one Pybricks observer snapshot. */
+pbio_error_t pup_motor_get_state(pup_motor_t *motor,
+                                  int32_t *count,
+                                  int32_t *speed);
+
+/** Updates externally-owned real-time motor power without repeatedly stopping
+ * the Pybricks parent controller. The caller must have stopped that controller
+ * before entering the periodic loop. */
+pbio_error_t pup_motor_set_power_realtime(pup_motor_t *motor, int power);
+
 /**
  * \~English
  * \brief    Set the speed of rotation of the motor.

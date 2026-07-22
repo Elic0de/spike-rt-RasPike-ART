@@ -135,12 +135,16 @@ dump_sp(uint32_t *sp)
   }
 }
 
+__attribute__((weak)) void target_emergency_stop(void) {
+}
+
 /*
  * ターゲット依存部 終了処理
  */
 void 
 target_abort(void)
 {
+  target_emergency_stop();
   syslog(LOG_EMERG, "Target abort.");
 
   syslog(LOG_EMERG, "Dump stack from top");

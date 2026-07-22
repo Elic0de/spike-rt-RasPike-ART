@@ -363,6 +363,61 @@ eSerialPort_write(CELLIDX idx, const char *buffer, uint_t length)
 }
 
 /*
+ *  シリアルポートへの非ブロッキング文字列送信（受け口関数）
+ *  フレーム全体を格納できる場合だけ書き込み，待ち状態には入らない．
+ */
+ER_UINT
+eSerialPort_tryWrite(CELLIDX idx, const char *buffer, uint_t length)
+{
+  CELLCB *p_cellcb;
+  ER ercd;
+  ER rercd;
+  bool_t buffer_full;
+  bool_t was_empty;
+
+  if (sns_dpn()) return E_CTX;
+  if (!VALID_IDX(idx)) return E_ID;
+  if (length > 0U && buffer == NULL) return E_PAR;
+
+  p_cellcb = GET_CELLCB(idx);
+  if (!VAR_openFlag) return E_OBJ;
+  if (VAR_errorFlag) return E_SYS;
+  if ((VAR_ioControl & IOCTL_CRLF) != 0U) return E_NOSPT;
+  if (length > ATTR_sendBufferSize) return E_QOVR;
+
+  rercd = cSendSemaphore_waitPolling();
+  if (rercd < 0) return E_QOVR;
+
+  SVC(loc_cpu(), gen_ercd_sys(p_cellcb));
+  if (length > ATTR_sendBufferSize - VAR_sendCount) {
+    SVC(unl_cpu(), gen_ercd_sys(p_cellcb));
+    SVC(cSendSemaphore_signal(), gen_ercd_sys(p_cellcb));
+    return E_QOVR;
+  }
+
+  was_empty = (VAR_sendCount == 0U);
+  for (uint_t i = 0U; i < length; ++i) {
+    VAR_sendBuffer[VAR_sendWritePointer] = buffer[i];
+    INC_PTR(VAR_sendWritePointer, ATTR_sendBufferSize);
+  }
+  VAR_sendCount += length;
+  buffer_full = (VAR_sendCount == ATTR_sendBufferSize);
+  if (was_empty && length > 0U) {
+    cSIOPort_enableCBR(SIOAsyncSendPop);
+  }
+  SVC(unl_cpu(), gen_ercd_sys(p_cellcb));
+
+  serialPort_writeBegin(p_cellcb);
+  if (!buffer_full) {
+    SVC(cSendSemaphore_signal(), gen_ercd_sys(p_cellcb));
+  }
+  return (ER_UINT)length;
+
+error_exit:
+  return ercd;
+}
+
+/*
  *  シリアルポートからの1文字受信
  */
 static ER_BOOL
@@ -513,205 +568,86 @@ eSerialPort_refer(CELLIDX idx, T_SERIAL_RPOR* pk_rpor)
 ER_UINT
 eSIOCBR_sizeSend(CELLIDX idx)
 {
-  CELLCB  *p_cellcb;
+  CELLCB *p_cellcb;
+  ER_UINT size;
   assert(VALID_IDX(idx));
   p_cellcb = GET_CELLCB(idx);
-
-  return VAR_sendCount;
+  loc_cpu();
+  size = (ER_UINT)VAR_sendCount;
+  unl_cpu();
+  return size;
 }
 
-/*
- * 送信バッファから１文字を取り出すコールバック．
- */
-ER_UINT
-eSIOCBR_popSend(CELLIDX idx, char *dst)
-{
-  CELLCB  *p_cellcb;
-  uint_t send_size = 0U;
-  ER    ercd;
-
-  assert(VALID_IDX(idx));
-  p_cellcb = GET_CELLCB(idx);
-
-  if (VAR_sendCount > 0U) {
-    /*
-     *  送信バッファから文字を取り出す．
-     */
-    *dst = VAR_sendBuffer[VAR_sendReadPointer];
-    INC_PTR(VAR_sendReadPointer, ATTR_sendBufferSize);
-    if (VAR_sendCount == ATTR_sendBufferSize) {
-      SVC(cSendSemaphore_signal(), gen_ercd_sys(p_cellcb));
-    }
-    VAR_sendCount--;
-    send_size = 1;
-  }
-
-  if (VAR_sendCount == 0U) {
-    /*
-     * これ以上送るべき文字が存在しない場合は，送信コールバックを禁止する．
-     */
-    cSIOPort_disableCBR(SIOAsyncSendPop);
-  }
-
-  ercd = (ER_UINT)send_size;
-
-  error_exit:
-  return(ercd);
-}
-
-
-#if 0
-/*
- * 送信バッファから指定された文字数以下の文字列を取り出すコールバック．
- */
 ER_UINT
 eSIOCBR_popSend(CELLIDX idx, char *dst_data, uint_t max_size)
 {
-  CELLCB  *p_cellcb;
-  uint_t send_size = 0U;
-  int buffer_tail_size;
-  ER    ercd;
+  CELLCB *p_cellcb;
+  uint_t send_size;
+  uint_t tail_size;
+  bool_t was_full;
 
   assert(VALID_IDX(idx));
   p_cellcb = GET_CELLCB(idx);
+  if (dst_data == NULL && max_size > 0U) return E_PAR;
 
-  // TODO: 競合状態は発生する？
-  //SVC(loc_cpu(), gen_ercd_sys(p_cellcb));
-  if (VAR_sendCount < ATTR_sendBufferSize) {
-    /*
-     * 送信バッファに空きがある場合，セマフォを獲得する．
-     * フルである場合は，eSerialPort_write() により獲得済みなので，
-     * 獲得しない．
-     */
-    SVC(rercd = cSendSemaphore_wait(), gen_ercd_wait(rercd, p_cellcb));
-  }
-  //SVC(unl_cpu(), gen_ercd_sys(p_cellcb));
-
-  if (VAR_sendCount > 0U) {
-    /*
-     *  送信バッファに送信するべき文字が存在する場合．
-     */
-    send_size = MIN(max_size, VAR_sendCount);
-    buffer_tail_size = ATTR_sendBufferSize - VAR_sendReadPointer;
-    if (send_size <= buffer_tail_size) {
+  loc_cpu();
+  send_size = MIN(max_size, VAR_sendCount);
+  was_full = (VAR_sendCount == ATTR_sendBufferSize);
+  if (send_size > 0U) {
+    tail_size = ATTR_sendBufferSize - VAR_sendReadPointer;
+    if (send_size <= tail_size) {
       memcpy(dst_data, &VAR_sendBuffer[VAR_sendReadPointer], send_size);
-    }
-    else {
-      memcpy(dst_data, &VAR_sendBuffer[VAR_sendReadPointer], buffer_tail_size);
-      memcpy(dst_data, &VAR_sendBuffer[0], send_size - buffer_tail_size);
+    } else {
+      memcpy(dst_data, &VAR_sendBuffer[VAR_sendReadPointer], tail_size);
+      memcpy(dst_data + tail_size, &VAR_sendBuffer[0], send_size - tail_size);
     }
     ADD_PTR(VAR_sendReadPointer, ATTR_sendBufferSize, send_size);
     VAR_sendCount -= send_size;
   }
+  if (VAR_sendCount == 0U) cSIOPort_disableCBR(SIOAsyncSendPop);
+  unl_cpu();
 
-  if (VAR_sendCount == 0U) {
-    /*
-     * これ以上送るべき文字が存在しない場合は，送信コールバックを禁止する．
-     */
-    cSIOPort_disableCBR(SIOAsyncSendPop);
+  if (was_full && send_size > 0U && cSendSemaphore_signal() < 0) {
+    VAR_errorFlag = true;
+    return E_SYS;
   }
-
-  SVC(cSendSemaphore_signal(), gen_ercd_sys(p_cellcb));
-  ercd = (ER_UINT)send_size;
-
-  error_exit:
-  return(ercd);
-}
-#endif
-
-/*
- *  シリアルポートからの受信通知コールバック（受け口関数）
- */
-ER_UINT
-eSIOCBR_pushReceive(CELLIDX idx, char src)
-{
-  CELLCB  *p_cellcb;
-  uint_t receive_size = 0U;
-  ER    ercd;
-
-  assert(VALID_IDX(idx));
-  p_cellcb = GET_CELLCB(idx);
-
-  if (VAR_receiveCount == ATTR_receiveBufferSize) {
-    /*
-     *  バッファフルの場合，受信した文字を捨てる．
-     */
-  }
-  else {
-    /*
-     *  受信した文字を受信バッファに入れる．
-     */
-    VAR_receiveBuffer[VAR_receiveWritePointer] = src;
-    INC_PTR(VAR_receiveWritePointer, ATTR_receiveBufferSize);
-    if (VAR_receiveCount == 0U) {
-      SVC(cReceiveSemaphore_signal(), gen_ercd_sys(p_cellcb));
-    }
-    VAR_receiveCount++;
-    receive_size = 1;
-  }
-  ercd = (ER_UINT)receive_size;
-
-  error_exit:
-  return(ercd);
+  return (ER_UINT)send_size;
 }
 
-#if 0
-/*
- *  シリアルポートからの受信通知コールバック（受け口関数）
- */
 ER_UINT
 eSIOCBR_pushReceive(CELLIDX idx, const char *src_data, uint_t size)
 {
-  CELLCB  *p_cellcb;
-  bool_t  buffer_empty;
-  uint_t receive_size = 0U;
-  int buffer_tail_size;
-  ER    ercd, rercd;
+  CELLCB *p_cellcb;
+  uint_t receive_size;
+  uint_t tail_size;
+  bool_t was_empty;
 
   assert(VALID_IDX(idx));
   p_cellcb = GET_CELLCB(idx);
+  if (src_data == NULL && size > 0U) return E_PAR;
 
-  //SVC(loc_cpu(), gen_ercd_sys(p_cellcb));
-  // TODO: 競合状態は発生する？
-  if (VAR_receiveCount == 0) {
-    /*
-     * 受信バッファが空ではない場合，セマフォを獲得済みのタスクが存在しないので
-     * セマフォを獲得する．この獲得では，待ち状態にならない．
-     * フルである場合は，セマフォが初期状態(0)
-     * または，eSerialPort_read()によって獲得済みなので，獲得しない．
-     */
-    SVC(rercd = cReceiveSemaphore_wait(), gen_ercd_wait(rercd, p_cellcb));
-  }
-  //SVC(unl_cpu(), gen_ercd_sys(p_cellcb));
-  
-  if (VAR_receiveCount == ATTR_receiveBufferSize) {
-    /*
-     *  バッファフルの場合，受信した文字を捨てる．
-     */
-  }
-  else {
-    /*
-     *  受信した文字をできるだけ受信バッファに入れる．
-     */
-    receive_size = MIN(ATTR_receiveBufferSize - VAR_receiveCount, size);
-    buffer_tail_size = ATTR_receiveBufferSize - VAR_receiveWritePointer;
-    if (receive_size <= buffer_tail_size) {
+  loc_cpu();
+  was_empty = (VAR_receiveCount == 0U);
+  receive_size = MIN(size, ATTR_receiveBufferSize - VAR_receiveCount);
+  if (receive_size > 0U) {
+    tail_size = ATTR_receiveBufferSize - VAR_receiveWritePointer;
+    if (receive_size <= tail_size) {
       memcpy(&VAR_receiveBuffer[VAR_receiveWritePointer], src_data, receive_size);
-    }
-    else {
-      memcpy(&VAR_receiveBuffer[VAR_receiveWritePointer], src_data, buffer_tail_size);
-      memcpy(&VAR_receiveBuffer[0], src_data, receive_size - buffer_tail_size);
+    } else {
+      memcpy(&VAR_receiveBuffer[VAR_receiveWritePointer], src_data, tail_size);
+      memcpy(&VAR_receiveBuffer[0], src_data + tail_size, receive_size - tail_size);
     }
     ADD_PTR(VAR_receiveWritePointer, ATTR_receiveBufferSize, receive_size);
     VAR_receiveCount += receive_size;
   }
-  SVC(cReceiveSemaphore_signal(), gen_ercd_sys(p_cellcb));
-  ercd = (ER_UINT)receive_size;
+  unl_cpu();
 
-  error_exit:
-  return(ercd);
+  if (was_empty && receive_size > 0U && cReceiveSemaphore_signal() < 0) {
+    VAR_errorFlag = true;
+    return E_SYS;
+  }
+  return (ER_UINT)receive_size;
 }
-#endif
 
 /*
  *  シリアルインタフェースドライバからの未送信文字の取出し

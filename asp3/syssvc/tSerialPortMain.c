@@ -357,6 +357,19 @@ eSerialPort_write(CELLIDX idx, const char *buffer, uint_t length)
 }
 
 /*
+ *  非同期USBドライバ専用の非ブロッキング送信．
+ *  従来SIOポートでは未サポートとする．
+ */
+ER_UINT
+eSerialPort_tryWrite(CELLIDX idx, const char *buffer, uint_t length)
+{
+  (void)idx;
+  (void)buffer;
+  (void)length;
+  return E_NOSPT;
+}
+
+/*
  *  シリアルポートからの1文字受信
  */
 static ER_BOOL

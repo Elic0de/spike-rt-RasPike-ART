@@ -38,6 +38,7 @@
 extern "C" {
 #endif
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /**
@@ -50,6 +51,12 @@ extern "C" {
  * \details     標準ライブラリexit(0)と同じ．CPUロック状態から呼び出してはいけない．
  */
 void hub_system_shutdown(void);
+
+/** Stops all Pybricks motor controllers and then brakes or coasts every H-bridge. */
+void hub_emergency_stop_all(bool brake);
+
+/** Fault-context-safe drive disable. Does not allocate, lock, or call the RTOS. */
+void hub_motor_emergency_disable_from_isr(void);
 
 #ifdef __cplusplus
 }
