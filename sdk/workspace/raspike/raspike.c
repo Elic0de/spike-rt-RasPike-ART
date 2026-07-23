@@ -133,6 +133,7 @@ static volatile bool fgSafetyTaskPending = false;
 static uint32_t fgSafetyUsbTxRecoverySeen = 0u;
 static uint32_t fgSafetyUsbReinitSeen = 0u;
 static uint32_t fgSafetyUsbRxOverflowSeen = 0u;
+static uint32_t fgSafetyUsbDisconnectSeen = 0u;
 static volatile uint32_t fgSafetyInhibitReasons = 0u;
 static volatile uint32_t fgSafetyGeneration = 0u;
 static uint32_t fgSafetyLastControlUpdateCount = 0u;
@@ -731,6 +732,7 @@ static int begin_link_session(bool reset_runtime)
   fgSafetyInhibitReasons &= ~(RP_SAFETY_INHIBIT_USB | RP_SAFETY_INHIBIT_CONTROL);
   fgSafetyControlStaleCycles = 0u;
   fgSafetyLastControlUpdateCount = fgDriveControllerUpdateCount;
+  fgSafetyUsbDisconnectSeen = pbdrv_usb_get_disconnect_count();
   fgSafetyUsbWasConnected = pbdrv_usb_is_connected();
   fgTxSequence = 1;
   fgActiveRequestSequence = 0;
@@ -1982,6 +1984,7 @@ void main_task(intptr_t exinf)
   fgSafetyUsbTxRecoverySeen = pbdrv_usb_get_tx_recovery_count();
   fgSafetyUsbReinitSeen = pbdrv_usb_get_reinit_count();
   fgSafetyUsbRxOverflowSeen = pbdrv_usb_get_rx_overflow_count();
+  fgSafetyUsbDisconnectSeen = pbdrv_usb_get_disconnect_count();
   fgSafetyUsbWasConnected = pbdrv_usb_is_connected();
   fgSafetyLastControlUpdateCount = fgDriveControllerUpdateCount;
   fgSafetyControlStaleCycles = 0u;
@@ -2041,15 +2044,18 @@ void safety_supervisor_task(intptr_t exinf)
   const uint32_t tx_recovery = pbdrv_usb_get_tx_recovery_count();
   const uint32_t reinit = pbdrv_usb_get_reinit_count();
   const uint32_t rx_overflow = pbdrv_usb_get_rx_overflow_count();
+  const uint32_t disconnect = pbdrv_usb_get_disconnect_count();
   const bool usb_connected = pbdrv_usb_is_connected();
   const bool usb_fault = tx_recovery != fgSafetyUsbTxRecoverySeen
       || reinit != fgSafetyUsbReinitSeen
       || rx_overflow != fgSafetyUsbRxOverflowSeen
+      || disconnect != fgSafetyUsbDisconnectSeen
       || (fgSafetyUsbWasConnected && !usb_connected);
 
   fgSafetyUsbTxRecoverySeen = tx_recovery;
   fgSafetyUsbReinitSeen = reinit;
   fgSafetyUsbRxOverflowSeen = rx_overflow;
+  fgSafetyUsbDisconnectSeen = disconnect;
   fgSafetyUsbWasConnected = usb_connected;
 
   const bool battery_critical = pbsys_status_test(
