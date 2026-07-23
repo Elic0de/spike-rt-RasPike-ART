@@ -440,9 +440,9 @@ static int32_t realtime_drive_configure_devices(void)
   stp_cyc(APP_DRIVE_TELEMETRY_CYC);
   fgDrivePreviousControlUs = 0u;
   realtime_drive_select_control_period(fgDriveControlPeriodUs);
-  /* Keep periodic USB telemetry out of the 4 ms control path. Runtime state
-     remains sampled internally and can be read after the experiment. */
-  stp_cyc(APP_RUNTIME_TELEMETRY_CYC);
+  /* Runtime telemetry runs in its own 10 ms task. Keep it active so the host
+     can observe the 4 ms controller without adding work to the hot path. */
+  sta_cyc(APP_RUNTIME_TELEMETRY_CYC);
   return 1;
 }
 
